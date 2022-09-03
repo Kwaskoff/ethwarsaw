@@ -6,12 +6,18 @@ import sys
 import time
 import urllib.request
 import urllib.error
+from decimal import Decimal
 
 
 API_URL = 'https://api.telegram.org/bot{bot_key}/test/{method}'
 BOT_KEY = ...
+# PHOTO_ID = 'https://i.ibb.co/qC9JRtY/640x360-ramp.png'
 PHOTO_ID = 'AgACAgIAAxkBAAMHYxJ12ZlK9nZoKO_eiPQgAWZDKQUAAqmnMRsk75FIGZf-VgNAQx0BAAMCAANtAAMpBA'
-LOGO_URL = 'https://i.ibb.co/R7VgfNN/photo-2022-09-03-16-47-31.jpg'
+
+RAMP_API = 'https://api-instant.hackaton.ramp-network.org/api'
+RAMP_WIDGET = 'https://widget.hackaton.ramp-network.org/'
+
+ASSETS = []
 
 
 def get_deep(obj_dic, *keys):
@@ -25,6 +31,73 @@ def get_deep(obj_dic, *keys):
         return get_deep(obj_dic[keys[0]], *keys[1:])
     else:
         return get_deep(getattr(obj_dic, keys[0], None), *keys[1:])
+
+
+def get_assets():
+    addr = RAMP_API + '/host-api/assets'
+    try:
+        with urllib.request.urlopen(addr, timeout=60) as response:
+            if response.status != 200:
+                return {}
+            html = response.read()
+            data = json.loads(html)
+            return data
+    except urllib.error.URLError as err:
+        print('URLError:', addr, 'err:', err, file=sys.stderr)
+        return {}
+    except socket.timeout:
+        return {}
+
+
+def search_crypto(query):
+    result = []
+    lower = query.lower()
+    for ass in ASSETS:
+        satisfied = False
+        for k in {'symbol', 'name'}:
+            val = ass[k].lower()
+            if query in val:
+                satisfied = True
+                break
+        if satisfied:
+            result += [ass]
+    return result
+
+
+def get_results(wallet, amount, assets):
+    results = []
+    for ass in assets:
+        ass_amount = Decimal(amount) * (10 ** ass['decimals'])
+        ass_code = ass['symbol']
+        results += [
+            {
+                'type': 'article',
+                'id': ass_code,
+                'title': ass['name'],
+                'input_message_content': {
+                    'message_text': f'Push the button below to pay for crypto with a credit card',
+                    'parse_mode': 'Markdown'
+                },
+                'reply_markup': {
+                    'inline_keyboard': [
+                        [
+                            {
+                                'text': 'Buy Crypto💰',
+                                'url': f'https://widget.hackaton.ramp-network.org?userAddress={wallet}&swapAmount={ass_amount}&swapAsset={ass_code}'
+                            }
+                        ],
+                        [
+                            {
+                                'text': 'Go to Ramp Bot 🤖',
+                                'url': 'https://t.me/ramp_bot'
+                            }
+                        ]
+                    ]
+                },
+                'thumb_url': ass['logoUrl']
+            }
+        ]
+    return results
 
 
 def request(method, params):
@@ -42,7 +115,6 @@ def request(method, params):
             return data
     except urllib.error.URLError as err:
         print('URLError:', addr, 'err:', err, file=sys.stderr)
-        # print('URLError:', addr, 'data:', jsondata, file=sys.stderr)
         time.sleep(1)
         return {}
     except socket.timeout:
@@ -78,40 +150,19 @@ def new_message(message):
 
 def new_inline_query(inline_query):
     query_id = inline_query['id']
-    wallet = inline_query['query'].split(' ')[0]
+    fields = inline_query['query'].split()
+    if len(fields) < 3:
+        request('answerInlineQuery', {
+            'inline_query_id': query_id,
+            'results': []
+        })
+        return
+    wallet, amount, currency = fields
+    assets = search_crypto(currency)
+    results = get_results(wallet, amount, assets)
     request('answerInlineQuery', {
         'inline_query_id': query_id,
-        'results': [
-            {
-                'type': 'article',
-                'id': 'pay',
-                'title': 'Pay via Ramp',
-                'input_message_content': {
-                    'message_text': f'Push the button below to pay for crypto with a credit card.\n\nUse my address below to pay 🔻\n\n`{wallet}`\n\n(Tap on address to copy it)',
-                    'parse_mode': 'Markdown'
-                },
-                'reply_markup': {
-                    'inline_keyboard': [
-                        [
-                            {
-                                'text': 'Buy Crypto💰',
-                                'url': 'https://widget.hackaton.ramp-network.org'
-                                # 'web_app': {
-                                #     'url': 'https://widget.hackaton.ramp-network.org'
-                                # }
-                            }
-                        ],
-                        [
-                            {
-                                'text': 'Go to Ramp Bot 🤖',
-                                'url': 'https://t.me/ramp_bot'
-                            }
-                        ]
-                    ]
-                },
-                'thumb_url': LOGO_URL
-            }
-        ]
+        'results': results
     })
 
 
@@ -125,6 +176,8 @@ def update(obj):
 
 
 def main():
+    global ASSETS
+    ASSETS = get_assets()['assets']
     offset = None
     try:
         while True:
