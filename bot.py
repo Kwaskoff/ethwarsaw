@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import json
+import re
 import socket
 import sys
 import time
@@ -11,6 +12,7 @@ from decimal import Decimal
 
 API_URL = 'https://api.telegram.org/bot{bot_key}/test/{method}'
 BOT_KEY = ...
+BOT_USERNAME = ...
 # PHOTO_ID = 'https://i.ibb.co/qC9JRtY/640x360-ramp.png'
 PHOTO_ID = 'AgACAgIAAxkBAAMHYxJ12ZlK9nZoKO_eiPQgAWZDKQUAAqmnMRsk75FIGZf-VgNAQx0BAAMCAANtAAMpBA'
 
@@ -69,27 +71,28 @@ def get_results(wallet, amount, assets):
     for ass in assets:
         ass_amount = Decimal(amount) * (10 ** ass['decimals'])
         ass_code = ass['symbol']
+        ass_name = ass['name']
         results += [
             {
                 'type': 'article',
                 'id': ass_code,
-                'title': ass['name'],
+                'title': ass_name,
                 'input_message_content': {
-                    'message_text': f'Push the button below to pay for crypto with a credit card',
+                    'message_text': f"Press the button below to pay for crypto with a credit card 🔻\n\n👛 Wallet:\n*{wallet}*\n\n🧮 Amount: *{amount} {ass['apiV3Symbol']}*\n\n🔗 Chain: *{ass_name}*",
                     'parse_mode': 'Markdown'
                 },
                 'reply_markup': {
                     'inline_keyboard': [
                         [
                             {
-                                'text': 'Buy Crypto💰',
-                                'url': f'https://widget.hackaton.ramp-network.org?userAddress={wallet}&swapAmount={ass_amount}&swapAsset={ass_code}'
+                                'text': 'Pay now 💰',
+                                'url': f'{RAMP_WIDGET}?userAddress={wallet}&swapAmount={ass_amount}&swapAsset={ass_code}'
                             }
                         ],
                         [
                             {
                                 'text': 'Go to Ramp Bot 🤖',
-                                'url': 'https://t.me/ramp_bot'
+                                'url': f'https://t.me/{BOT_USERNAME}'
                             }
                         ]
                     ]
@@ -133,14 +136,14 @@ def new_message(message):
                     {
                         'text': 'Buy cryptocurrency',
                         'web_app': {
-                            'url': 'https://widget.hackaton.ramp-network.org'
+                            'url': RAMP_WIDGET
                         }
                     }
                 ],
                 [
                     {
                         'text': 'Add to menu 📎',
-                        'url': 'https://t.me/ramp_bot?startattach'
+                        'url': f'https://t.me/{BOT_USERNAME}?startattach'
                     }
                 ]
             ]
@@ -151,15 +154,16 @@ def new_message(message):
 def new_inline_query(inline_query):
     query_id = inline_query['id']
     fields = inline_query['query'].split()
-    if len(fields) < 3:
-        request('answerInlineQuery', {
-            'inline_query_id': query_id,
-            'results': []
-        })
-        return
-    wallet, amount, currency = fields
-    assets = search_crypto(currency)
-    results = get_results(wallet, amount, assets)
+    results = []
+    while True:
+        if len(fields) < 3:
+            break
+        wallet, amount, currency = fields[:3]
+        if not re.fullmatch(r'\d+(\.\d+)?', amount):
+            break
+        assets = search_crypto(currency)
+        results = get_results(wallet, amount, assets)
+        break
     request('answerInlineQuery', {
         'inline_query_id': query_id,
         'results': results
